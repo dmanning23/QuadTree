@@ -2,80 +2,96 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Windows;
+using Microsoft.Xna.Framework;
 
 namespace QuadTreeLib
 {
-	internal class QuadNode
+	internal class QuadNode<T>
 	{
-		private static int _id = 0;
-		public readonly int ID = _id++;
+		#region Members
 
-		public QuadNode Parent { get; internal set; }
+		/// <summary>
+		/// The node that this guy is inside of
+		/// </summary>
+		public QuadNode<T> Parent { get; internal set; }
 
-		private QuadNode[] _nodes = new QuadNode[4];
-		public QuadNode this[Direction direction]
+		/// <summary>
+		/// The four child nodes of this dude
+		/// </summary>
+		private QuadNode<T>[] _nodes = new QuadNode<T>[4];
+
+		/// <summary>
+		/// Get one of the child nodes via the [] operator
+		/// </summary>
+		/// <param name="direction"></param>
+		/// <returns></returns>
+		internal QuadNode<T> this[EDirection direction]
 		{
 			get
 			{
-				switch (direction)
-				{
-					case Direction.NW:
-						return _nodes[0];
-					case Direction.NE:
-						return _nodes[1];
-					case Direction.SW:
-						return _nodes[2];
-					case Direction.SE:
-						return _nodes[3];
-					default:
-						return null;
-				}
+				return _nodes[(int)direction];
+				
 			}
 			set
 			{
-				switch (direction)
-				{
-					case Direction.NW:
-						_nodes[0] = value;
-						break;
-					case Direction.NE:
-						_nodes[1] = value;
-						break;
-					case Direction.SW:
-						_nodes[2] = value;
-						break;
-					case Direction.SE:
-						_nodes[3] = value;
-						break;
-				}
+				//hold onto the node
+				_nodes[(int)direction] = value;
+				
+				//set the node's parent to this dude
 				if (value != null)
+				{
 					value.Parent = this;
+				}
 			}
 		}
 
-		public ReadOnlyCollection<QuadNode> Nodes;
+		public ReadOnlyCollection<QuadNode<T>> Nodes;
 
 		internal List<T> quadObjects = new List<T>();
+
 		public ReadOnlyCollection<T> Objects;
 
-		public Rect Bounds { get; internal set; }
+		/// <summary>
+		/// The size and location of this node
+		/// </summary>
+		public Rectangle Bounds { get; internal set; }
 
+		#endregion //Members
+
+		#region Methods
+
+		/// <summary>
+		/// Constructor
+		/// </summary>
+		/// <param name="bounds"></param>
+		public QuadNode(Rectangle bounds)
+		{
+			Bounds = bounds;
+			Nodes = new ReadOnlyCollection<QuadNode<T>>(_nodes);
+			Objects = new ReadOnlyCollection<T>(quadObjects);
+		}
+
+		/// <summary>
+		/// constructor
+		/// </summary>
+		/// <param name="x"></param>
+		/// <param name="y"></param>
+		/// <param name="width"></param>
+		/// <param name="height"></param>
+		public QuadNode(int x, int y, int width, int height)
+			: this(new Rectangle(x, y, width, height))
+		{
+		}
+
+		/// <summary>
+		/// whether or not there are any child nodes of this dude
+		/// </summary>
+		/// <returns></returns>
 		public bool HasChildNodes()
 		{
 			return _nodes[0] != null;
 		}
 
-		public QuadNode(Rect bounds)
-		{
-			Bounds = bounds;
-			Nodes = new ReadOnlyCollection<QuadNode>(_nodes);
-			Objects = new ReadOnlyCollection<T>(quadObjects);
-		}
-
-		public QuadNode(double x, double y, double width, double height)
-			: this(new Rect(x, y, width, height))
-		{
-
-		}
+		#endregion //Methods
 	}
 }

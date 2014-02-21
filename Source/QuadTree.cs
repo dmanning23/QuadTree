@@ -1,535 +1,373 @@
+using Microsoft.Xna.Framework;
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
-using System.Windows;
 
 namespace QuadTreeLib
 {
-    public class QuadTree<T> where T : class, IQuadObject
-    {
-        private readonly bool sort;
-        private readonly Size minLeafSize;
-        private readonly int maxObjectsPerLeaf;
-        private QuadNode root = null;
-        private Dictionary<T, QuadNode> objectToNodeLookup = new Dictionary<T, QuadNode>();
-        private Dictionary<T, int> objectSortOrder = new Dictionary<T, int>();
-        public QuadNode Root { get { return root; } }
-        private object syncLock = new object();
-        private int objectSortId = 0;
+	/// <summary>
+	/// the quadtree object
+	/// </summary>
+	/// <typeparam name="T"></typeparam>
+	public class QuadTree<T> where T : class, IQuadObject
+	{
+		#region Members
 
-        public QuadTree(Size minLeafSize, int maxObjectsPerLeaf)
-        {
-            this.minLeafSize = minLeafSize;
-            this.maxObjectsPerLeaf = maxObjectsPerLeaf;
-        }
+		/// <summary>
+		/// The smallest size a leaf will split into
+		/// </summary>
+		private readonly Vector2 minLeafSize;
 
-        public int GetSortOrder(T quadObject)
-        {
-            lock (objectSortOrder)
-            {
-                if (!objectSortOrder.ContainsKey(quadObject))
-                    return -1;
-                else
-                {
-                    return objectSortOrder[quadObject];
-                }
-            }
-        }
+		/// <summary>
+		/// Maximum number of objects per leaf before it forces a split into sub quadrants
+		/// </summary>
+		private readonly int maxObjectsPerLeaf;
 
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="minLeafSize">The smallest size a leaf will split into</param>
-        /// <param name="maxObjectsPerLeaf">Maximum number of objects per leaf before it forces a split into sub quadrants</param>
-        /// <param name="sort">Whether or not queries will return objects in the order in which they were added</param>
-        public QuadTree(Size minLeafSize, int maxObjectsPerLeaf, bool sort)
-            : this(minLeafSize, maxObjectsPerLeaf)
-        {
-            this.sort = sort;
-        }
+		/// <summary>
+		/// A dictionary of items -> nodes 
+		/// </summary>
+		private Dictionary<T, QuadNode<T>> objectToNodeLookup = new Dictionary<T, QuadNode<T>>();
 
-        public void Insert(T quadObject)
-        {
-            lock (syncLock)
-            {
-                if (sort & !objectSortOrder.ContainsKey(quadObject))
-                {
-                    objectSortOrder.Add(quadObject, objectSortId++);
-                }
+		/// <summary>
+		/// The root (top) node of the quadtree
+		/// </summary>
+		internal QuadNode<T> Root { get; private set; }
 
-                Rect bounds = quadObject.Bounds;
-                if (root == null)
-                {
-                    var rootSize = new Size(Math.Ceiling(bounds.Width / minLeafSize.Width),
-                                            Math.Ceiling(bounds.Height / minLeafSize.Height));
-                    double multiplier = Math.Max(rootSize.Width, rootSize.Height);
-                    rootSize = new Size(minLeafSize.Width * multiplier, minLeafSize.Height * multiplier);
-                    var center = new Point(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);
-                    var rootOrigin = new Point(center.X - rootSize.Width / 2, center.Y - rootSize.Height / 2);
-                    root = new QuadNode(new Rect(rootOrigin, rootSize));
-                }
+		#endregion //Members
 
-                while (!root.Bounds.Contains(bounds))
-                {
-                    ExpandRoot(bounds);
-                }
+		#region Methods
 
-                InsertNodeObject(root, quadObject);
-            }
-        }
+		/// <summary>
+		/// constructor
+		/// </summary>
+		/// <param name="minLeafSize">The smallest size a leaf will split into</param>
+		/// <param name="maxObjectsPerLeaf">Maximum number of objects per leaf before it forces a split into sub quadrants</param>
+		public QuadTree(Vector2 minLeafSize, int maxObjectsPerLeaf)
+		{
+			this.minLeafSize = minLeafSize;
+			this.maxObjectsPerLeaf = maxObjectsPerLeaf;
+		}
 
-        public List<T> Query(Rect bounds)
-        {
-            lock (syncLock)
-            {
-                List<T> results = new List<T>();
-                if (root != null)
-                    Query(bounds, root, results);
-                if (sort)
-                    results.Sort((a, b) => { return objectSortOrder[a].CompareTo(objectSortOrder[b]); });
-                return results;
-            }
-        }
+		/// <summary>
+		/// Add an item to the quadtree
+		/// </summary>
+		/// <param name="quadObject"></param>
+		public void Insert(T quadObject)
+		{
+			Rectangle bounds = quadObject.Bounds;
+			if (Root == null)
+			{
+				var rootSize = new Vector2((float)Math.Ceiling(bounds.Width / minLeafSize.X),
+										(float)Math.Ceiling(bounds.Height / minLeafSize.Y));
+				float multiplier = Math.Max(rootSize.X, rootSize.Y);
+				rootSize = new Vector2(minLeafSize.X * multiplier, minLeafSize.Y * multiplier);
+				var center = new Point(bounds.X + bounds.Width / 2, bounds.Y + bounds.Height / 2);
+				var rootOrigin = new Point((int)(center.X - rootSize.X / 2), (int)(center.Y - rootSize.Y / 2));
+				Root = new QuadNode<T>(new Rectangle(rootOrigin.X, rootOrigin.Y, (int)rootSize.X, (int)rootSize.Y));
+			}
 
-        private void Query(Rect bounds, QuadNode node, List<T> results)
-        {
-            lock (syncLock)
-            {
-                if (node == null) return;
+			while (!Root.Bounds.Contains(bounds))
+			{
+				ExpandRoot(bounds);
+			}
 
-                if (bounds.IntersectsWith(node.Bounds))
-                {
-                    foreach (T quadObject in node.Objects)
-                    {
-                        if (bounds.IntersectsWith(quadObject.Bounds))
-                            results.Add(quadObject);
-                    }
+			InsertNodeObject(Root, quadObject);
+		}
 
-                    foreach (QuadNode childNode in node.Nodes)
-                    {
-                        Query(bounds, childNode, results);
-                    }
-                }
-            }
-        }
+		/// <summary>
+		/// Given a qurey rectangle, get all the items that should be checked.
+		/// </summary>
+		/// <param name="bounds"></param>
+		/// <returns></returns>
+		public List<T> Query(Rectangle bounds)
+		{
+			var results = new List<T>();
+			if (Root != null)
+			{
+				Query(bounds, Root, results);
+			}
+			return results;
+		}
 
-        private void ExpandRoot(Rect newChildBounds)
-        {
-            lock (syncLock)
-            {
-                bool isNorth = root.Bounds.Y < newChildBounds.Y;
-                bool isWest = root.Bounds.X < newChildBounds.X;
+		#region Private Methods
 
-                Direction rootDirection;
-                if (isNorth)
-                {
-                    rootDirection = isWest ? Direction.NW : Direction.NE;
-                }
-                else
-                {
-                    rootDirection = isWest ? Direction.SW : Direction.SE;
-                }
+		private void Query(Rectangle bounds, QuadNode<T> node, List<T> results)
+		{
+			if (node == null) return;
 
-                double newX = (rootDirection == Direction.NW || rootDirection == Direction.SW)
-                                  ? root.Bounds.X
-                                  : root.Bounds.X - root.Bounds.Width;
-                double newY = (rootDirection == Direction.NW || rootDirection == Direction.NE)
-                                  ? root.Bounds.Y
-                                  : root.Bounds.Y - root.Bounds.Height;
-                Rect newRootBounds = new Rect(newX, newY, root.Bounds.Width * 2, root.Bounds.Height * 2);
-                QuadNode newRoot = new QuadNode(newRootBounds);
-                SetupChildNodes(newRoot);
-                newRoot[rootDirection] = root;
-                root = newRoot;
-            }
-        }
+			if (bounds.Intersects(node.Bounds))
+			{
+				foreach (T quadObject in node.Objects)
+				{
+					if (bounds.Intersects(quadObject.Bounds))
+						results.Add(quadObject);
+				}
 
-        private void InsertNodeObject(QuadNode node, T quadObject)
-        {
-            lock (syncLock)
-            {
-                if (!node.Bounds.Contains(quadObject.Bounds))
-                    throw new Exception("This should not happen, child does not fit within node bounds");
+				foreach (QuadNode<T> childNode in node.Nodes)
+				{
+					Query(bounds, childNode, results);
+				}
+			}
+		}
 
-                if (!node.HasChildNodes() && node.Objects.Count + 1 > maxObjectsPerLeaf)
-                {
-                    SetupChildNodes(node);
+		private void ExpandRoot(Rectangle newChildBounds)
+		{
+			bool isNorth = Root.Bounds.Y < newChildBounds.Y;
+			bool isWest = Root.Bounds.X < newChildBounds.X;
 
-                    List<T> childObjects = new List<T>(node.Objects);
-                    List<T> childrenToRelocate = new List<T>();
+			EDirection rootDirection;
+			if (isNorth)
+			{
+				rootDirection = isWest ? EDirection.NW : EDirection.NE;
+			}
+			else
+			{
+				rootDirection = isWest ? EDirection.SW : EDirection.SE;
+			}
 
-                    foreach (T childObject in childObjects)
-                    {
-                        foreach (QuadNode childNode in node.Nodes)
-                        {
-                            if (childNode == null)
-                                continue;
+			int newX = (rootDirection == EDirection.NW || rootDirection == EDirection.SW)
+							  ? Root.Bounds.X
+							  : Root.Bounds.X - Root.Bounds.Width;
+			int newY = (rootDirection == EDirection.NW || rootDirection == EDirection.NE)
+							  ? Root.Bounds.Y
+							  : Root.Bounds.Y - Root.Bounds.Height;
+			Rectangle newRootBounds = new Rectangle(newX, newY, Root.Bounds.Width * 2, Root.Bounds.Height * 2);
+			QuadNode<T> newRoot = new QuadNode<T>(newRootBounds);
+			SetupChildNodes(newRoot);
+			newRoot[rootDirection] = Root;
+			Root = newRoot;
+		}
 
-                            if (childNode.Bounds.Contains(childObject.Bounds))
-                            {
-                                childrenToRelocate.Add(childObject);
-                            }
-                        }
-                    }
+		private void InsertNodeObject(QuadNode<T> node, T quadObject)
+		{
+			if (!node.Bounds.Contains(quadObject.Bounds))
+				throw new Exception("This should not happen, child does not fit within node bounds");
 
-                    foreach (T childObject in childrenToRelocate)
-                    {
-                        RemoveQuadObjectFromNode(childObject);
-                        InsertNodeObject(node, childObject);
-                    }
-                }
+			if (!node.HasChildNodes() && node.Objects.Count + 1 > maxObjectsPerLeaf)
+			{
+				SetupChildNodes(node);
 
-                foreach (QuadNode childNode in node.Nodes)
-                {
-                    if (childNode != null)
-                    {
-                        if (childNode.Bounds.Contains(quadObject.Bounds))
-                        {
-                            InsertNodeObject(childNode, quadObject);
-                            return;
-                        }
-                    }
-                }
+				List<T> childObjects = new List<T>(node.Objects);
+				List<T> childrenToRelocate = new List<T>();
 
-                AddQuadObjectToNode(node, quadObject);
-            }
-        }
+				foreach (T childObject in childObjects)
+				{
+					foreach (QuadNode<T> childNode in node.Nodes)
+					{
+						if (childNode == null)
+							continue;
 
-        private void ClearQuadObjectsFromNode(QuadNode node)
-        {
-            lock (syncLock)
-            {
-                List<T> quadObjects = new List<T>(node.Objects);
-                foreach (T quadObject in quadObjects)
-                {
-                    RemoveQuadObjectFromNode(quadObject);
-                }
-            }
-        }
+						if (childNode.Bounds.Contains(childObject.Bounds))
+						{
+							childrenToRelocate.Add(childObject);
+						}
+					}
+				}
 
-        private void RemoveQuadObjectFromNode(T quadObject)
-        {
-            lock (syncLock)
-            {
-                QuadNode node = objectToNodeLookup[quadObject];
-                node.quadObjects.Remove(quadObject);
-                objectToNodeLookup.Remove(quadObject);
-                quadObject.BoundsChanged -= new EventHandler(quadObject_BoundsChanged);
-            }
-        }
+				foreach (T childObject in childrenToRelocate)
+				{
+					RemoveQuadObjectFromNode(childObject);
+					InsertNodeObject(node, childObject);
+				}
+			}
 
-        private void AddQuadObjectToNode(QuadNode node, T quadObject)
-        {
-            lock (syncLock)
-            {
-                node.quadObjects.Add(quadObject);
-                objectToNodeLookup.Add(quadObject, node);
-                quadObject.BoundsChanged += new EventHandler(quadObject_BoundsChanged);
-            }
-        }
+			foreach (QuadNode<T> childNode in node.Nodes)
+			{
+				if (childNode != null)
+				{
+					if (childNode.Bounds.Contains(quadObject.Bounds))
+					{
+						InsertNodeObject(childNode, quadObject);
+						return;
+					}
+				}
+			}
 
-        void quadObject_BoundsChanged(object sender, EventArgs e)
-        {
-            lock (syncLock)
-            {
-                T quadObject = sender as T;
-                if (quadObject != null)
-                {
-                    QuadNode node = objectToNodeLookup[quadObject];
-                    if (!node.Bounds.Contains(quadObject.Bounds) || node.HasChildNodes())
-                    {
-                        RemoveQuadObjectFromNode(quadObject);
-                        Insert(quadObject);
-                        if (node.Parent != null)
-                        {
-                            CheckChildNodes(node.Parent);
-                        }
-                    }
-                }
-            }
-        }
+			AddQuadObjectToNode(node, quadObject);
+		}
 
-        private void SetupChildNodes(QuadNode node)
-        {
-            lock (syncLock)
-            {
-                if (minLeafSize.Width <= node.Bounds.Width / 2 && minLeafSize.Height <= node.Bounds.Height / 2)
-                {
-                    node[Direction.NW] = new QuadNode(node.Bounds.X, node.Bounds.Y, node.Bounds.Width / 2,
-                                                      node.Bounds.Height / 2);
-                    node[Direction.NE] = new QuadNode(node.Bounds.X + node.Bounds.Width / 2, node.Bounds.Y,
-                                                      node.Bounds.Width / 2,
-                                                      node.Bounds.Height / 2);
-                    node[Direction.SW] = new QuadNode(node.Bounds.X, node.Bounds.Y + node.Bounds.Height / 2,
-                                                      node.Bounds.Width / 2,
-                                                      node.Bounds.Height / 2);
-                    node[Direction.SE] = new QuadNode(node.Bounds.X + node.Bounds.Width / 2,
-                                                      node.Bounds.Y + node.Bounds.Height / 2,
-                                                      node.Bounds.Width / 2, node.Bounds.Height / 2);
+		private void RemoveQuadObjectFromNode(T quadObject)
+		{
+			QuadNode<T> node = objectToNodeLookup[quadObject];
+			node.quadObjects.Remove(quadObject);
+			objectToNodeLookup.Remove(quadObject);
+			quadObject.BoundsChanged -= new EventHandler(quadObject_BoundsChanged);
+		}
 
-                }
-            }
-        }
+		private void AddQuadObjectToNode(QuadNode<T> node, T quadObject)
+		{
+			node.quadObjects.Add(quadObject);
+			objectToNodeLookup.Add(quadObject, node);
+			quadObject.BoundsChanged += new EventHandler(quadObject_BoundsChanged);
+		}
 
-        public void Remove(T quadObject)
-        {
-            lock (syncLock)
-            {
-                if (sort && objectSortOrder.ContainsKey(quadObject))
-                {
-                    objectSortOrder.Remove(quadObject);
-                }
+		private void quadObject_BoundsChanged(object sender, EventArgs e)
+		{
+			T quadObject = sender as T;
+			if (quadObject != null)
+			{
+				QuadNode<T> node = objectToNodeLookup[quadObject];
+				if (!node.Bounds.Contains(quadObject.Bounds) || node.HasChildNodes())
+				{
+					RemoveQuadObjectFromNode(quadObject);
+					Insert(quadObject);
+					if (node.Parent != null)
+					{
+						CheckChildNodes(node.Parent);
+					}
+				}
+			}
+		}
 
-                if (!objectToNodeLookup.ContainsKey(quadObject))
-                    throw new KeyNotFoundException("QuadObject not found in dictionary for removal");
+		private void SetupChildNodes(QuadNode<T> node)
+		{
+			if (minLeafSize.X <= node.Bounds.Width / 2 && minLeafSize.Y <= node.Bounds.Height / 2)
+			{
+				node[EDirection.NW] = new QuadNode<T>(node.Bounds.X, node.Bounds.Y, node.Bounds.Width / 2,
+												  node.Bounds.Height / 2);
+				node[EDirection.NE] = new QuadNode<T>(node.Bounds.X + node.Bounds.Width / 2, node.Bounds.Y,
+												  node.Bounds.Width / 2,
+												  node.Bounds.Height / 2);
+				node[EDirection.SW] = new QuadNode<T>(node.Bounds.X, node.Bounds.Y + node.Bounds.Height / 2,
+												  node.Bounds.Width / 2,
+												  node.Bounds.Height / 2);
+				node[EDirection.SE] = new QuadNode<T>(node.Bounds.X + node.Bounds.Width / 2,
+												  node.Bounds.Y + node.Bounds.Height / 2,
+												  node.Bounds.Width / 2, node.Bounds.Height / 2);
 
-                QuadNode containingNode = objectToNodeLookup[quadObject];
-                RemoveQuadObjectFromNode(quadObject);
+			}
+		}
 
-                if (containingNode.Parent != null)
-                    CheckChildNodes(containingNode.Parent);
-            }
-        }
+		public void Remove(T quadObject)
+		{
+			if (!objectToNodeLookup.ContainsKey(quadObject))
+				throw new KeyNotFoundException("QuadObject not found in dictionary for removal");
 
+			QuadNode<T> containingNode = objectToNodeLookup[quadObject];
+			RemoveQuadObjectFromNode(quadObject);
 
+			if (containingNode.Parent != null)
+				CheckChildNodes(containingNode.Parent);
+		}
 
-        private void CheckChildNodes(QuadNode node)
-        {
-            lock (syncLock)
-            {
-                if (GetQuadObjectCount(node) <= maxObjectsPerLeaf)
-                {
-                    // Move child objects into this node, and delete sub nodes
-                    List<T> subChildObjects = GetChildObjects(node);
-                    foreach (T childObject in subChildObjects)
-                    {
-                        if (!node.Objects.Contains(childObject))
-                        {
-                            RemoveQuadObjectFromNode(childObject);
-                            AddQuadObjectToNode(node, childObject);
-                        }
-                    }
-                    if (node[Direction.NW] != null)
-                    {
-                        node[Direction.NW].Parent = null;
-                        node[Direction.NW] = null;
-                    }
-                    if (node[Direction.NE] != null)
-                    {
-                        node[Direction.NE].Parent = null;
-                        node[Direction.NE] = null;
-                    }
-                    if (node[Direction.SW] != null)
-                    {
-                        node[Direction.SW].Parent = null;
-                        node[Direction.SW] = null;
-                    }
-                    if (node[Direction.SE] != null)
-                    {
-                        node[Direction.SE].Parent = null;
-                        node[Direction.SE] = null;
-                    }
+		private void CheckChildNodes(QuadNode<T> node)
+		{
+			if (GetQuadObjectCount(node) <= maxObjectsPerLeaf)
+			{
+				// Move child objects into this node, and delete sub nodes
+				List<T> subChildObjects = GetChildObjects(node);
+				foreach (T childObject in subChildObjects)
+				{
+					if (!node.Objects.Contains(childObject))
+					{
+						RemoveQuadObjectFromNode(childObject);
+						AddQuadObjectToNode(node, childObject);
+					}
+				}
+				if (node[EDirection.NW] != null)
+				{
+					node[EDirection.NW].Parent = null;
+					node[EDirection.NW] = null;
+				}
+				if (node[EDirection.NE] != null)
+				{
+					node[EDirection.NE].Parent = null;
+					node[EDirection.NE] = null;
+				}
+				if (node[EDirection.SW] != null)
+				{
+					node[EDirection.SW].Parent = null;
+					node[EDirection.SW] = null;
+				}
+				if (node[EDirection.SE] != null)
+				{
+					node[EDirection.SE].Parent = null;
+					node[EDirection.SE] = null;
+				}
 
-                    if (node.Parent != null)
-                        CheckChildNodes(node.Parent);
-                    else
-                    {
-                        // Its the root node, see if we're down to one quadrant, with none in local storage - if so, ditch the other three
-                        int numQuadrantsWithObjects = 0;
-                        QuadNode nodeWithObjects = null;
-                        foreach (QuadNode childNode in node.Nodes)
-                        {
-                            if (childNode != null && GetQuadObjectCount(childNode) > 0)
-                            {
-                                numQuadrantsWithObjects++;
-                                nodeWithObjects = childNode;
-                                if (numQuadrantsWithObjects > 1) break;
-                            }
-                        }
-                        if (numQuadrantsWithObjects == 1)
-                        {
-                            foreach (QuadNode childNode in node.Nodes)
-                            {
-                                if (childNode != nodeWithObjects)
-                                    childNode.Parent = null;
-                            }
-                            root = nodeWithObjects;
-                        }
-                    }
-                }
-            }
-        }
+				if (node.Parent != null)
+					CheckChildNodes(node.Parent);
+				else
+				{
+					// Its the root node, see if we're down to one quadrant, with none in local storage - if so, ditch the other three
+					int numQuadrantsWithObjects = 0;
+					QuadNode<T> nodeWithObjects = null;
+					foreach (var childNode in node.Nodes)
+					{
+						if (childNode != null && GetQuadObjectCount(childNode) > 0)
+						{
+							numQuadrantsWithObjects++;
+							nodeWithObjects = childNode;
+							if (numQuadrantsWithObjects > 1) break;
+						}
+					}
+					if (numQuadrantsWithObjects == 1)
+					{
+						foreach (var childNode in node.Nodes)
+						{
+							if (childNode != nodeWithObjects)
+								childNode.Parent = null;
+						}
+						Root = nodeWithObjects;
+					}
+				}
+			}
+		}
 
+		private List<T> GetChildObjects(QuadNode<T> node)
+		{
+			List<T> results = new List<T>();
+			results.AddRange(node.quadObjects);
+			foreach (var childNode in node.Nodes)
+			{
+				if (childNode != null)
+					results.AddRange(GetChildObjects(childNode));
+			}
+			return results;
+		}
 
-        private List<T> GetChildObjects(QuadNode node)
-        {
-            lock (syncLock)
-            {
-                List<T> results = new List<T>();
-                results.AddRange(node.quadObjects);
-                foreach (QuadNode childNode in node.Nodes)
-                {
-                    if (childNode != null)
-                        results.AddRange(GetChildObjects(childNode));
-                }
-                return results;
-            }
-        }
+		public int GetQuadObjectCount()
+		{
+			if (Root == null)
+				return 0;
+			int count = GetQuadObjectCount(Root);
+			return count;
+		}
 
-        public int GetQuadObjectCount()
-        {
-            lock (syncLock)
-            {
-                if (root == null)
-                    return 0;
-                int count = GetQuadObjectCount(root);
-                return count;
-            }
-        }
+		private int GetQuadObjectCount(QuadNode<T> node)
+		{
+			int count = node.Objects.Count;
+			foreach (var childNode in node.Nodes)
+			{
+				if (childNode != null)
+				{
+					count += GetQuadObjectCount(childNode);
+				}
+			}
+			return count;
+		}
 
-        private int GetQuadObjectCount(QuadNode node)
-        {
-            lock (syncLock)
-            {
-                int count = node.Objects.Count;
-                foreach (QuadNode childNode in node.Nodes)
-                {
-                    if (childNode != null)
-                    {
-                        count += GetQuadObjectCount(childNode);
-                    }
-                }
-                return count;
-            }
-        }
+		public int GetQuadNodeCount()
+		{
+			if (Root == null)
+				return 0;
+			int count = GetQuadNodeCount(Root, 1);
+			return count;
+		}
 
-        public int GetQuadNodeCount()
-        {
-            lock (syncLock)
-            {
-                if (root == null)
-                    return 0;
-                int count = GetQuadNodeCount(root, 1);
-                return count;
-            }
-        }
+		private int GetQuadNodeCount(QuadNode<T> node, int count)
+		{
+			if (node == null) return count;
 
-        private int GetQuadNodeCount(QuadNode node, int count)
-        {
-            lock (syncLock)
-            {
-                if (node == null) return count;
+			foreach (var childNode in node.Nodes)
+			{
+				if (childNode != null)
+					count++;
+			}
+			return count;
+		}
 
-                foreach (QuadNode childNode in node.Nodes)
-                {
-                    if (childNode != null)
-                        count++;
-                }
-                return count;
-            }
-        }
+		#endregion //Private Methods
 
-        public List<QuadNode> GetAllNodes()
-        {
-            lock (syncLock)
-            {
-                List<QuadNode> results = new List<QuadNode>();
-                if (root != null)
-                {
-                    results.Add(root);
-                    GetChildNodes(root, results);
-                }
-                return results;
-            }
-        }
-
-        private void GetChildNodes(QuadNode node, ICollection<QuadNode> results)
-        {
-            lock (syncLock)
-            {
-                foreach (QuadNode childNode in node.Nodes)
-                {
-                    if (childNode != null)
-                    {
-                        results.Add(childNode);
-                        GetChildNodes(childNode, results);
-                    }
-                }
-            }
-        }
-
-        public class QuadNode
-        {
-            private static int _id = 0;
-            public readonly int ID = _id++;
-
-            public QuadNode Parent { get; internal set; }
-
-            private QuadNode[] _nodes = new QuadNode[4];
-            public QuadNode this[Direction direction]
-            {
-                get
-                {
-                    switch (direction)
-                    {
-                        case Direction.NW:
-                            return _nodes[0];
-                        case Direction.NE:
-                            return _nodes[1];
-                        case Direction.SW:
-                            return _nodes[2];
-                        case Direction.SE:
-                            return _nodes[3];
-                        default:
-                            return null;
-                    }
-                }
-                set
-                {
-                    switch (direction)
-                    {
-                        case Direction.NW:
-                            _nodes[0] = value;
-                            break;
-                        case Direction.NE:
-                            _nodes[1] = value;
-                            break;
-                        case Direction.SW:
-                            _nodes[2] = value;
-                            break;
-                        case Direction.SE:
-                            _nodes[3] = value;
-                            break;
-                    }
-                    if (value != null)
-                        value.Parent = this;
-                }
-            }
-
-            public ReadOnlyCollection<QuadNode> Nodes;
-
-            internal List<T> quadObjects = new List<T>();
-            public ReadOnlyCollection<T> Objects;
-
-            public Rect Bounds { get; internal set; }
-
-            public bool HasChildNodes()
-            {
-                return _nodes[0] != null;
-            }
-
-            public QuadNode(Rect bounds)
-            {
-                Bounds = bounds;
-                Nodes = new ReadOnlyCollection<QuadNode>(_nodes);
-                Objects = new ReadOnlyCollection<T>(quadObjects);
-            }
-
-            public QuadNode(double x, double y, double width, double height)
-                : this(new Rect(x, y, width, height))
-            {
-
-            }
-        }
-    }
+		#endregion //Methods
+	}
 }
