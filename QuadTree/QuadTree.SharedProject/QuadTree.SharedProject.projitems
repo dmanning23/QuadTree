@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <MSBuildAllProjects>$(MSBuildAllProjects);$(MSBuildThisFileFullPath)</MSBuildAllProjects>
+    <HasSharedItems>true</HasSharedItems>
+    <SharedGUID>509ed20f-6777-4760-9712-536e430d2a06</SharedGUID>
+  </PropertyGroup>
+  <PropertyGroup Label="Configuration">
+    <Import_RootNamespace>QuadTree.SharedProject</Import_RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)EDirection.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)IQuadObject.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)QuadNode.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)QuadTree.cs" />
+  </ItemGroup>
+</Project>
